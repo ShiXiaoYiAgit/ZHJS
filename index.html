@@ -936,6 +936,18 @@ body {
           <span class="dark-toggle__knob"></span>
         </button>
       </div>
+      <div id="tokenSection" style="display:none;margin:0 12px 12px;padding:14px 18px;border-radius:18px;background:var(--md-sys-color-surface-variant);">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">
+          <span style="font-size:1.0625rem;font-weight:500;color:var(--md-sys-color-on-surface);">API Token</span>
+          <span id="tokenStatus" style="font-size:12px;color:var(--md-sys-color-on-surface-variant);font-family:'Roboto Mono',monospace;"></span>
+        </div>
+        <input type="text" id="tokenInput" placeholder="粘贴 DFRobot API Token（iot.dfrobot.com.cn → 个人中心）" spellcheck="false"
+          style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-sys-color-outline);background:var(--md-sys-color-surface);color:var(--md-sys-color-on-surface);font-family:'Roboto Mono',monospace;font-size:12px;user-select:text;-webkit-user-select:text;">
+        <div style="display:flex;gap:10px;margin-top:10px;">
+          <button id="tokenSaveBtn" class="glass-modal__cancel ripple" style="flex:1;padding:10px;font-size:0.95rem;">保存并刷新</button>
+          <button id="tokenResetBtn" class="glass-modal__cancel ripple" style="flex:1;padding:10px;font-size:0.95rem;background:var(--md-sys-color-surface);color:var(--md-sys-color-on-surface);border:1px solid var(--md-sys-color-outline);">恢复默认</button>
+        </div>
+      </div>
     </div>
     <div class="glass-modal__footer">
       <button class="glass-modal__cancel ripple" id="settingsModalCancel">关闭</button>
@@ -955,6 +967,22 @@ body {
     pollInterval: 10000,
     localPort: 5000 // 本地 Python 代理端口（可选兜底通道）
   };
+
+  /* ===== Token 管理：支持在设置页手动更换并本地保存 ===== */
+  const DEFAULT_TOKEN = CFG.apiToken;
+  function tokenExpDate(t) {
+    try {
+      const parts = String(t).split('.');
+      if (parts.length < 2) return null;
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+      if (payload.exp) return new Date(payload.exp * 1000);
+    } catch (e) {}
+    return null;
+  }
+  (function loadSavedToken() {
+    const t = localStorage.getItem('smart-classroom-token');
+    if (t && t.trim()) CFG.apiToken = t.trim();
+  })();
 
   /* ===== Disable right-click & text selection ===== */
   document.addEventListener('contextmenu', e => e.preventDefault());
@@ -1122,6 +1150,25 @@ body {
     applyTheme('custom', e.target.value);
   });
 
+  /* ===== 隐藏手势：1 秒内连点深色模式开关 5 次，显示/隐藏 Token 区块 ===== */
+  let secretClicks = [];
+  document.getElementById('darkModeSwitch').addEventListener('click', function() {
+    const now = Date.now();
+    secretClicks = secretClicks.filter(function(t) { return now - t < 1000; });
+    secretClicks.push(now);
+    if (secretClicks.length >= 5) {
+      secretClicks = [];
+      const sec = document.getElementById('tokenSection');
+      const show = sec.style.display === 'none';
+      sec.style.display = show ? 'block' : 'none';
+      localStorage.setItem('smart-classroom-token-visible', show ? '1' : '0');
+    }
+  });
+  // 记住上次的显隐状态
+  if (localStorage.getItem('smart-classroom-token-visible') === '1') {
+    document.getElementById('tokenSection').style.display = 'block';
+  }
+
   document.getElementById('darkModeSwitch').addEventListener('click', function() {
     const isActive = this.classList.toggle('active');
     forceDark = isActive;
@@ -1274,7 +1321,47 @@ body {
   document.getElementById('dateModalBackdrop').addEventListener('click', () => closeModal('dateModal'));
 
   /* ===== Settings Modal ===== */
-  document.getElementById('btnSettings').addEventListener('click', () => openModal('settingsModal'));
+  function updateTokenStatus() {
+    const el = document.getElementById('tokenStatus');
+    if (!el) return;
+    const exp = tokenExpDate(CFG.apiToken);
+    const isCustom = CFG.apiToken !== DEFAULT_TOKEN;
+    if (exp) {
+      const s = exp.getFullYear() + '-' + pad(exp.getMonth() + 1) + '-' + pad(exp.getDate())
+              + ' ' + pad(exp.getHours()) + ':' + pad(exp.getMinutes());
+      const expired = exp.getTime() < Date.now();
+      el.textContent = (isCustom ? '自定义 · ' : '') + (expired ? '已过期 ' : '过期 ') + s;
+      el.style.color = expired ? 'var(--md-sys-color-error)' : 'var(--md-sys-color-success)';
+    } else {
+      el.textContent = isCustom ? '自定义 Token（无法解析有效期）' : '默认 Token';
+      el.style.color = isCustom ? 'var(--md-sys-color-warning)' : '';
+    }
+  }
+
+  document.getElementById('tokenSaveBtn').addEventListener('click', function() {
+    const t = document.getElementById('tokenInput').value.trim();
+    if (!t) { updateTokenStatus(); return; }
+    CFG.apiToken = t;
+    localStorage.setItem('smart-classroom-token', t);
+    updateTokenStatus();
+    closeModal('settingsModal');
+    refreshAll();
+  });
+
+  document.getElementById('tokenResetBtn').addEventListener('click', function() {
+    CFG.apiToken = DEFAULT_TOKEN;
+    localStorage.removeItem('smart-classroom-token');
+    document.getElementById('tokenInput').value = DEFAULT_TOKEN;
+    updateTokenStatus();
+    refreshAll();
+  });
+
+  document.getElementById('btnSettings').addEventListener('click', () => {
+    const saved = localStorage.getItem('smart-classroom-token');
+    document.getElementById('tokenInput').value = saved || '';
+    updateTokenStatus();
+    openModal('settingsModal');
+  });
   document.getElementById('settingsModalCancel').addEventListener('click', () => closeModal('settingsModal'));
   document.getElementById('settingsModalBackdrop').addEventListener('click', () => closeModal('settingsModal'));
 
