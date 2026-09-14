@@ -965,8 +965,8 @@ body {
     pollInterval: 10000,
     localPort: 5000 // 本地 Python 代理端口（可选兜底通道）
   };
-  // 若占位符未被 Cloudflare 构建替换（即本地直接打开），则使用备用 Token
-  if (CFG.apiToken.indexOf('__DFROBOT_TOKEN__') !== -1) CFG.apiToken = CFG.fallbackToken;
+  // 若占位符未被 Cloudflare 构建替换（长度明显不足，即本地直接打开），则使用备用 Token
+  if (CFG.apiToken.length < 50) CFG.apiToken = CFG.fallbackToken;
 
   /* ===== Token 展示：解析 JWT 有效期，设置页只读显示 ===== */
   function tokenExpDate(t) {
