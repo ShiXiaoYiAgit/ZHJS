@@ -235,6 +235,13 @@ body {
   background: var(--md-sys-color-secondary-container);
   color: var(--md-sys-color-on-secondary-container);
 }
+.data-card__icon--people {
+  background: var(--md-sys-color-tertiary);
+  color: #FFFFFF;
+}
+:root[data-theme="dark"] .data-card__icon--people {
+  color: #1C1B1F;
+}
 .data-card__icon svg { width: 24px; height: 24px; }
 .data-card__label {
   font-size: 1.0625rem;
@@ -839,6 +846,26 @@ body {
           <span class="data-card__status-dot"></span>等待数据
         </div>
       </div>
+      <div class="data-card ripple" id="cardPeople">
+        <div class="data-card__header">
+          <div class="data-card__icon data-card__icon--people">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+          </div>
+          <span class="data-card__label">实时人数</span>
+        </div>
+        <div>
+          <span class="data-card__value" id="valPeople">--</span>
+          <span class="data-card__unit">人</span>
+        </div>
+        <div class="data-card__status data-card__status--ok" id="statusPeople">
+          <span class="data-card__status-dot"></span>等待数据
+        </div>
+      </div>
     </div>
     <div class="time-bar">
       <div class="time-bar__top">
@@ -943,6 +970,17 @@ body {
         </div>
         <div id="tokenDisplay" style="padding:10px 12px;border-radius:10px;border:1px solid var(--md-sys-color-outline);background:var(--md-sys-color-surface);color:var(--md-sys-color-on-surface);font-family:'Roboto Mono',monospace;font-size:12px;word-break:break-all;user-select:text;-webkit-user-select:text;"></div>
       </div>
+      <div id="tokenEditSection" style="display:none;margin:0 12px 12px;padding:14px 18px;border-radius:18px;background:var(--md-sys-color-surface-variant);">
+        <div style="margin-bottom:8px;">
+          <span style="font-size:1.0625rem;font-weight:500;color:var(--md-sys-color-on-surface);">自定义 Token</span>
+        </div>
+        <input type="text" id="tokenInput" placeholder="粘贴 DFRobot API Token（iot.dfrobot.com.cn → 个人中心）" spellcheck="false"
+          style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-sys-color-outline);background:var(--md-sys-color-surface);color:var(--md-sys-color-on-surface);font-family:'Roboto Mono',monospace;font-size:12px;user-select:text;-webkit-user-select:text;">
+        <div style="display:flex;gap:10px;margin-top:10px;">
+          <button id="tokenSaveBtn" class="glass-modal__cancel ripple" style="flex:1;padding:10px;font-size:0.95rem;">保存并刷新</button>
+          <button id="tokenResetBtn" class="glass-modal__cancel ripple" style="flex:1;padding:10px;font-size:0.95rem;background:var(--md-sys-color-surface);color:var(--md-sys-color-on-surface);border:1px solid var(--md-sys-color-outline);">恢复默认</button>
+        </div>
+      </div>
     </div>
     <div class="glass-modal__footer">
       <button class="glass-modal__cancel ripple" id="settingsModalCancel">关闭</button>
@@ -963,10 +1001,18 @@ body {
     fallbackToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3ODkyMDE1MzgsImlvdF9uYW1lIjoielV5endOUURSIiwibmJmIjoxNzg5MDI4NzM4LCJ1c2VyX2lkIjoiNWNiMTE2MGQ2YmI3NGE0ZDgzMTc0MDI4YjAyNDM4OWIifQ.bj8BLI-jCCiBr-oKhiUjRdAMTxYE0vMn078ekvsa8lY',
     topic: 'rqMHQNQvR',
     pollInterval: 10000,
-    localPort: 5000 // 本地 Python 代理端口（可选兜底通道）
+    localPort: 5000, // 本地 Python 代理端口（可选兜底通道）
+    peopleTopic: 'Ln1n8t9DR', // 实时人数 Topic（每10秒上传纯数字）
+    peoplePollInterval: 10000 // 人数轮询间隔（与上传频率一致）
   };
   // 若占位符未被 Cloudflare 构建替换（长度明显不足，即本地直接打开），则使用备用 Token
   if (CFG.apiToken.length < 50) CFG.apiToken = CFG.fallbackToken;
+  const BUILT_IN_TOKEN = CFG.apiToken; // 构建部署后的内置 Token（恢复默认用）
+  // 本地保存的自定义 Token 优先（设置页手动输入）
+  (function loadSavedToken() {
+    const t = localStorage.getItem('smart-classroom-token');
+    if (t && t.trim().length > 50) CFG.apiToken = t.trim();
+  })();
 
   /* ===== Token 展示：解析 JWT 有效期，设置页只读显示 ===== */
   function tokenExpDate(t) {
@@ -1160,6 +1206,40 @@ body {
   document.getElementById('customColorInput').addEventListener('input', e => {
     document.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
     applyTheme('custom', e.target.value);
+  });
+
+  /* ===== 隐藏手势：1 秒内连点深色模式开关 8 次，显示/隐藏自定义 Token ===== */
+  let tokenSecretClicks = [];
+  document.getElementById('darkModeSwitch').addEventListener('click', function() {
+    const now = Date.now();
+    tokenSecretClicks = tokenSecretClicks.filter(function(t) { return now - t < 1000; });
+    tokenSecretClicks.push(now);
+    if (tokenSecretClicks.length >= 8) {
+      tokenSecretClicks = [];
+      const sec = document.getElementById('tokenEditSection');
+      const show = sec.style.display === 'none';
+      sec.style.display = show ? 'block' : 'none';
+      localStorage.setItem('smart-classroom-token-edit-visible', show ? '1' : '0');
+    }
+  });
+  if (localStorage.getItem('smart-classroom-token-edit-visible') === '1') {
+    document.getElementById('tokenEditSection').style.display = 'block';
+  }
+
+  document.getElementById('tokenSaveBtn').addEventListener('click', function() {
+    const t = document.getElementById('tokenInput').value.trim();
+    if (!t) return;
+    CFG.apiToken = t;
+    localStorage.setItem('smart-classroom-token', t);
+    closeModal('settingsModal');
+    refreshAll();
+  });
+
+  document.getElementById('tokenResetBtn').addEventListener('click', function() {
+    CFG.apiToken = BUILT_IN_TOKEN;
+    localStorage.removeItem('smart-classroom-token');
+    document.getElementById('tokenInput').value = '';
+    refreshAll();
   });
 
   document.getElementById('darkModeSwitch').addEventListener('click', function() {
@@ -1601,8 +1681,8 @@ body {
   }
 
   /* ===== 数据通道列表：依次尝试，任何一个成功即停止 ===== */
-  function buildChannels() {
-    const postBody = JSON.stringify({ topic: CFG.topic, count: 1000 });
+  function buildChannelsFor(topic, count, includeLocal) {
+    const postBody = JSON.stringify({ topic: topic, count: count });
     const tokenQ = '?token=' + encodeURIComponent(CFG.apiToken);
     const chans = [
       // 标准直连（带 Authorization 头）
@@ -1624,10 +1704,15 @@ body {
       chans.push({ name: proxyDefs[i][0], url: proxyDefs[i][1](CFG.apiUrl),
         method: 'POST', headers: stdHeaders(), body: postBody });
     }
-    // 本机 Python 代理兜底（需先运行 smart_classroom_server.py）
-    chans.push({ name: '本地Python代理', url: 'http://localhost:' + (CFG.localPort || 5000) + '/api/paired',
-      method: 'GET', headers: {}, local: true });
+    if (includeLocal) {
+      // 本机 Python 代理兜底（需先运行 smart_classroom_server.py）
+      chans.push({ name: '本地Python代理', url: 'http://localhost:' + (CFG.localPort || 5000) + '/api/paired',
+        method: 'GET', headers: {}, local: true });
+    }
     return chans;
+  }
+  function buildChannels() {
+    return buildChannelsFor(CFG.topic, 1000, true);
   }
 
   /* ===== 从 DFRobot API 响应中提取消息并 A_/M_ 配对 ===== */
@@ -1717,6 +1802,65 @@ body {
       '<br><br><b>提示</b>：可在本机运行 <code>python smart_classroom_server.py</code> 后刷新页面（自动走本地代理通道）。按 F12 打开控制台可查看每个通道的详细日志。');
   }
 
+  /* ===== 实时人数：获取指定 Topic 最新一条原始消息 ===== */
+  async function fetchLatestRawMessage(topic) {
+    for (const ch of buildChannelsFor(topic, 10, false)) {
+      try {
+        const resp = await fetchWithTimeout(ch.url, {
+          method: ch.method, headers: ch.headers, body: ch.body
+        }, 12000);
+        if (!resp.ok) continue;
+        const text = await resp.text();
+        let data;
+        try { data = JSON.parse(text); } catch (e) { continue; }
+        let rawMessages = [];
+        if (Array.isArray(data)) {
+          rawMessages = data;
+        } else if (typeof data === 'object' && data !== null) {
+          const keys = ['messages', 'data', 'list', 'items', 'result', 'records', 'rows'];
+          for (const key of keys) {
+            if (data[key] && Array.isArray(data[key])) { rawMessages = data[key]; break; }
+          }
+        }
+        let latest = null;
+        rawMessages.forEach(function(m) {
+          if (!m || typeof m !== 'object') return;
+          let rawTime = null, rawMsg = null;
+          const timeKeys = ['time', 'timestamp', 'created', 'created_at', 'create_time', 'send_time', 'pub_time', 'publish_time', 'msg_time', 'createTime', 'sendTime', 'publishTime', 'msgTime', 'createdAt', 'gmt_create', 'gmtCreate', 'date', 'datetime', 'ts'];
+          for (const k of timeKeys) { if (m[k] != null) { rawTime = m[k]; break; } }
+          const msgKeys = ['message', 'msg', 'content', 'payload', 'data', 'value', 'body', 'text'];
+          for (const k of msgKeys) { if (m[k] != null) { rawMsg = m[k]; break; } }
+          const t = parseApiTime(rawTime);
+          if (!t || rawMsg == null) return;
+          if (!latest || t > latest.time) latest = { time: t, text: String(rawMsg) };
+        });
+        if (latest) return latest;
+      } catch (e) { /* 尝试下一通道 */ }
+    }
+    return null;
+  }
+
+  /* ===== 实时人数：更新卡片（每10秒） ===== */
+  async function updatePeopleCount() {
+    const latest = await fetchLatestRawMessage(CFG.peopleTopic);
+    const statusEl = document.getElementById('statusPeople');
+    if (!latest) {
+      statusEl.className = 'data-card__status data-card__status--warn';
+      statusEl.innerHTML = '<span class="data-card__status-dot"></span>获取失败，10秒后重试';
+      return;
+    }
+    const n = parseInt(latest.text.trim(), 10);
+    if (isNaN(n)) {
+      document.getElementById('valPeople').textContent = latest.text.trim().slice(0, 8);
+      statusEl.className = 'data-card__status data-card__status--warn';
+      statusEl.innerHTML = '<span class="data-card__status-dot"></span>数据非纯数字';
+      return;
+    }
+    document.getElementById('valPeople').textContent = n;
+    statusEl.className = 'data-card__status data-card__status--ok';
+    statusEl.innerHTML = '<span class="data-card__status-dot"></span>更新于 ' + fmtListTime(latest.time);
+  }
+
   function showError(title, msg) {
     document.getElementById('listBody').innerHTML = 
       '<div style="padding:40px;text-align:center;color:var(--md-sys-color-error);line-height:1.7">' +
@@ -1739,6 +1883,8 @@ body {
   renderList();
   refreshAll();
   setInterval(refreshAll, CFG.pollInterval);
+  updatePeopleCount();
+  setInterval(updatePeopleCount, CFG.peoplePollInterval);
 })();
 </script>
 </body>
